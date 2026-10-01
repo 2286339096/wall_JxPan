@@ -1,9 +1,7 @@
 // Cloudflare Workers - 网盘解析脚本
 // 支持: 123云盘(www.123pan.cn) | 移动云盘(yun.139.com) | 阿里云盘(alipan.com) | 小飞机网盘(feijipan.com) | 蓝奏云优享版(ilanzou.com) | 蓝奏云(lanzou*.com) | 夸克网盘(quark.cn) | UC网盘(drive.uc.cn) | 光鸭云盘(guangyapan.com) | 天翼云盘(cloud.189.cn) | 移动云盘(yun.139.comyun.139.com)
 
-// 更新时间：2026.08.27
-// 项目地址：https://github.com/ByLsPro/JxPan
-// 作者：灵衫Pro
+// 更新时间：2026.10.01
 
 const cookieCache = {
     aliyun: { value: null, timestamp: 0 },
@@ -375,6 +373,16 @@ function getConfig(env) {
             accessToken: "",
             loginInfo: "",
             userAgent: "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Mobile Safari/537.36 Edg/134.0.0.0"
+        },
+
+        // 公告弹窗
+        announcement: {
+            enabled: false,
+            title: "公告",
+            content: "",
+            link: "",
+            linkText: "查看详情",
+            dismissHours: 24
         }
 
     };
@@ -437,6 +445,16 @@ function getConfig(env) {
             enabled: true,
             accessToken: env.P189_TOKEN || env.p189_token || env.CLOUD189_TOKEN || defaults.cloud189.accessToken,
             loginInfo: defaults.cloud189.loginInfo
+        },
+
+        // 公告弹窗
+        announcement: {
+            enabled: env.ANNOUNCEMENT_ENABLED === 'true' || defaults.announcement.enabled,
+            title: env.ANNOUNCEMENT_TITLE || defaults.announcement.title,
+            content: env.ANNOUNCEMENT_CONTENT || defaults.announcement.content,
+            link: env.ANNOUNCEMENT_LINK || defaults.announcement.link,
+            linkText: env.ANNOUNCEMENT_LINK_TEXT || defaults.announcement.linkText,
+            dismissHours: parseInt(env.ANNOUNCEMENT_DISMISS_HOURS) || defaults.announcement.dismissHours
         }
 
     };
@@ -1772,7 +1790,7 @@ async function d1ListByPrefix(db, prefix) {
     }
 }
 
-// ============================== 存储兼容层(弃) ==============================
+// ============================== 存储兼容层(优先D1,回退KV) ==============================
 async function storePut(env, key, value, options) {
     if (env.jxpan) {
         if (typeof value === 'object') {
@@ -2356,7 +2374,10 @@ async function handleAdminRequest(request, env) {
                 } catch (e3) {}
             }
 
-            var records = allRecords.filter(function(r) { return r.success === true; });            
+            // 过滤出成功记录
+            var records = allRecords.filter(function(r) { return r.success === true; });
+            
+            // 分页截取
             var pageRecords = records.slice(0, limit);
             var totalRecords = records.length;
 
@@ -2397,6 +2418,7 @@ async function handleAdminRequest(request, env) {
         }
     }
 
+    // 独立的失败记录接口
     if (action === 'get_failed_records') {
         try {
             var fPageParam = url.searchParams.get('page') || '1';
@@ -2418,12 +2440,16 @@ async function handleAdminRequest(request, env) {
                 });
             }
 
+            // 先获取所有记录总数
             var fCountSql = "SELECT COUNT(*) as cnt FROM kv_store WHERE key LIKE 'parse_record_%'";
             var fCountResult = await env.jxpan.prepare(fCountSql).first();
             var fTotalAllRecords = (fCountResult && fCountResult.cnt) ? fCountResult.cnt : 0;
+
+            // 多取记录用于解密后过滤（最多200条）
             var fFetchLimit = Math.min(fLimit * 3, 200);
             var fOffset = (fPage - 1) * fFetchLimit;
 
+            // 获取原始记录（不过滤type，因为数据是加密的）
             var fQuerySql = "SELECT key, value FROM kv_store WHERE key LIKE 'parse_record_%' ORDER BY key DESC LIMIT " + fFetchLimit + " OFFSET " + fOffset;
             console.log('[后台] 失败记录QUERY SQL:', fQuerySql);
             var fQueryResult = await env.jxpan.prepare(fQuerySql).all();
@@ -2431,6 +2457,7 @@ async function handleAdminRequest(request, env) {
             var fRows = fQueryResult.results || [];
             var fAllRecords = [];
 
+            // 解密并解析每条记录
             for (var j = 0; j < fRows.length; j++) {
                 try {
                     var fRow = fRows[j];
@@ -2443,6 +2470,7 @@ async function handleAdminRequest(request, env) {
 
                     if (!fRecord || !fRecord.id) continue;
 
+                    // 提取msg和code字段
                     var fRecordMsg = '';
                     if (fRecord.json && fRecord.json.msg) {
                         fRecordMsg = fRecord.json.msg;
@@ -2451,8 +2479,10 @@ async function handleAdminRequest(request, env) {
                     }
                     var fRecordCode = (fRecord.json && fRecord.json.code !== undefined) ? fRecord.json.code : (fRecord.code || null);
 
+                    // 判断是否成功: msg="解析成功" 或 code=200 或 code="success"
                     var fIsSuccess = (fRecordMsg === '解析成功' || fRecordCode === 200 || fRecordCode === 'success');
 
+                    // 构建记录对象
                     var fRecObj = {};
                     fRecObj.id = fRecord.id;
                     fRecObj.url = fRecord.url || '';
@@ -2487,8 +2517,10 @@ async function handleAdminRequest(request, env) {
                 } catch (fe3) {}
             }
 
+            // 过滤出失败记录
             var fRecords = fAllRecords.filter(function(r) { return r.success !== true; });
 
+            // 分页截取
             var fPageRecords = fRecords.slice(0, fLimit);
             var fTotalRecords = fRecords.length;
 
@@ -2839,6 +2871,7 @@ async function saveParseRecord(env, url, pwd, result) {
             await storePut(env, recordKey, encryptedRecord, { expirationTtl: 7 * 24 * 3600 });
             console.log('[*] 解析记录已保存:', recordKey);
             
+            // 增量更新缓存统计 - 成功条件: msg="解析成功" 或 code=200 或 code="success"
             var isSuccess = (result.msg === '解析成功' || result.code === 200 || result.code === 'success');
             if (env.jxpan) {
                 await incrementRecordsCache(env.jxpan, isSuccess);
@@ -2870,6 +2903,7 @@ async function d1GetParseRecords(db, options) {
     try {
         console.log('[D1] 获取解析记录:', 'page=' + page + ' limit=' + limit + ' type=' + type + ' search=' + search);
 
+        // Step 1: 获取所有记录（不添加type过滤，因为数据被加密了）
         var countSql = "SELECT COUNT(*) as total FROM kv_store WHERE key LIKE 'parse_record_%'";
         console.log('[D1] COUNT SQL:', countSql);
         var countResult = await db.prepare(countSql).first();
@@ -2878,7 +2912,9 @@ async function d1GetParseRecords(db, options) {
 
         console.log('[D1] 数据库中总记录数:', totalRecordsInDb);
 
+        // Step 2: 分页获取原始数据（不解密）
         var offset = (page - 1) * limit;
+        // 多取一些记录用于过滤（最多200条）
         var fetchLimit = Math.min(limit * 3, 200);
 
         var dataSql = "SELECT key, value FROM kv_store WHERE key LIKE 'parse_record_%' ORDER BY key DESC LIMIT " + fetchLimit + " OFFSET " + offset;
@@ -2888,7 +2924,8 @@ async function d1GetParseRecords(db, options) {
 
         console.log('[D1] 获取到原始记录数:', rows.length);
 
-        var allRecords = [];
+        // Step 3: 解密并解析每条记录
+        var allRecords = [];  // 存储所有解密后的记录
 
         for (var i = 0; i < rows.length; i++) {
             try {
@@ -2915,6 +2952,7 @@ async function d1GetParseRecords(db, options) {
 
                 if (!record || !record.id) continue;
 
+                // 提取msg字段（优先从json中获取）
                 var recordMsg = '';
                 if (record.json && record.json.msg) {
                     recordMsg = record.json.msg;
@@ -2922,6 +2960,7 @@ async function d1GetParseRecords(db, options) {
                     recordMsg = record.msg;
                 }
 
+                // 统一判断逻辑 - 成功条件: msg="解析成功" 或 code=200 或 code="success"
                 var recordCode = (record.json && record.json.code !== undefined) ? record.json.code : (record.code || null);
                 var isSuccess = (recordMsg === '解析成功' || recordCode === 200 || recordCode === 'success');
 
@@ -2978,6 +3017,7 @@ async function d1GetParseRecords(db, options) {
 
         console.log('[D1] 解析后有效记录数:', allRecords.length);
 
+        // Step 4: 根据type参数过滤
         var filteredRecords = allRecords;
 
         if (type === 'success') {
@@ -2988,6 +3028,7 @@ async function d1GetParseRecords(db, options) {
             console.log('[D1] 过滤(failed)后:', filteredRecords.length, '条');
         }
 
+        // Step 5: 如果有搜索词，再进行搜索过滤
         if (search && search.trim()) {
             var decodedSearch = decodeURIComponent(search);
             var searchLower = decodedSearch.toLowerCase();
@@ -3006,9 +3047,12 @@ async function d1GetParseRecords(db, options) {
             console.log('[D1] 搜索过滤后:', filteredRecords.length, '条');
         }
 
+        // Step 6: 对过滤后的结果进行最终分页
         var finalTotal = filteredRecords.length;
         var finalPages = Math.max(1, Math.ceil(finalTotal / limit));
         var paginatedRecords = filteredRecords.slice(0, limit);
+
+        // Step 7: 分离成功和失败
         var successList = [];
         var failedList = [];
 
@@ -3020,9 +3064,11 @@ async function d1GetParseRecords(db, options) {
             }
         }
 
+        // Step 8: 统计总数（使用缓存机制避免CPU超限）
         var successTotal = 0;
         var failedTotal = 0;
 
+        // 优先尝试从缓存读取统计数据
         var cachedStats = await getRecordsStatsFromCache(db);
         
         if (cachedStats) {
@@ -3343,6 +3389,7 @@ async function searchParseRecords(env, searchTerm) {
 
         // 使用D1数据库
         if (env.jxpan) {
+            // Step 1: 获取所有记录（不使用SQL LIKE过滤）
             var dataSql = "SELECT key, value FROM kv_store WHERE key LIKE 'parse_record_%' ORDER BY key DESC LIMIT 200";
             console.log('[搜索] DATA SQL:', dataSql);
             var dataResult = await env.jxpan.prepare(dataSql).all();
@@ -3350,6 +3397,7 @@ async function searchParseRecords(env, searchTerm) {
 
             console.log('[搜索] 获取到原始记录数:', rows.length);
 
+            // Step 2: 解密并解析每条记录
             for (var i = 0; i < rows.length; i++) {
                 try {
                     var row = rows[i];
@@ -3441,6 +3489,7 @@ async function searchParseRecords(env, searchTerm) {
 
         console.log('[搜索] 解析后有效记录数:', allRecords.length);
 
+        // Step 3: 在内存中进行搜索过滤
         var filteredRecords = allRecords.filter(function(record) {
             var urlMatch = record.url && record.url.toLowerCase().indexOf(searchLower) !== -1;
             var pwdMatch = record.pwd && record.pwd.toLowerCase().indexOf(searchLower) !== -1;
@@ -3454,6 +3503,7 @@ async function searchParseRecords(env, searchTerm) {
 
         console.log('[搜索] 搜索过滤后:', filteredRecords.length, '条');
 
+        // Step 4: 分离成功和失败
         var successList = [];
         var failedList = [];
 
@@ -9241,17 +9291,40 @@ class LanzouParser {
 
     async getUrl(js, info, error, pwd, id, domain = null, pageCookie = '', origHost = null) {
         const usedDomain = domain || this.apiDomain;
+        // 🔑 从原始 js（未被注释清理破坏前）提取绝对 AJAX URL
+        const rawAjax = (js || '').replace(/\\\//g, '/');
+        const absAjaxMatch = rawAjax.match(/['"]((?:https?:)?\/\/[^'"]+\/ajax(?:file|m)\.php\?file=\d+)['"]/);
+        const absoluteAjaxUrl = absAjaxMatch
+            ? (absAjaxMatch[1].startsWith('//') ? 'https:' + absAjaxMatch[1] : absAjaxMatch[1])
+            : null;
+        
         const cleanedData = js.replace(/\/\/.*|\/\*[\s\S]*?\*\/|function woio[\s\S]*?}/g, '');
         
-        const fileIdMatch = cleanedData.match(/file=(\d+)/);
-        const fileid = fileIdMatch ? parseInt(fileIdMatch[1]) : null;
+        // 🔑 fileId 优先从绝对AJAX URL提取（cleanedData的//注释清理会破坏URL中的file=xxx）
+        let fileid = null;
+        if (absAjaxMatch) {
+            const fidFromUrl = absAjaxMatch[1].match(/file=(\d+)/);
+            if (fidFromUrl) fileid = parseInt(fidFromUrl[1]);
+        }
+        if (!fileid) {
+            const rawFid = rawAjax.match(/file=(\d+)/);
+            if (rawFid) fileid = parseInt(rawFid[1]);
+        }
+        if (!fileid) {
+            const fileIdMatch = cleanedData.match(/file=(\d+)/);
+            if (fileIdMatch) fileid = parseInt(fileIdMatch[1]);
+        }
         info.fid = fileid;
         
         // 🔑 从页面JS提取真实的ajax接口路径（单文件=ajaxfile.php，文件夹=ajaxm.php）
         // 参考PHP: preg_match_all("~(?:^|/)(ajax(?:m|file)\.php\?file=\d+)~")
         const ajaxPathMatch = cleanedData.match(/(?:^|\/)(ajax(?:m|file)\.php\?file=\d+)/);
-        const ajaxPath = ajaxPathMatch ? ajaxPathMatch[1] : `ajaxm.php?file=${fileid}`;
+        const ajaxPath = ajaxPathMatch ? ajaxPathMatch[1] : `ajaxfile.php?file=${fileid}`;
+        const buildAjaxRequestUrl = (tryDomain) => absoluteAjaxUrl || `https://${tryDomain}/${ajaxPath}`;
         console.log('[*] 🔑 提取到ajax接口路径:', ajaxPath);
+        if (absoluteAjaxUrl) {
+            console.log('[*] 🔑 使用页面绝对ajax接口:', absoluteAjaxUrl);
+        }
         
         if (cleanedData.includes("document.getElementById('pwd').value;") && !pwd) {
             info.download_url = null;
@@ -9309,6 +9382,11 @@ class LanzouParser {
             return this.createResponse(501, error || "获取失败", null);
         }
         
+        // 🔑 wp_sign 提取（与独立脚本一致，优先于普通 sign）
+        const wpSignMatch = cleanedData.match(/var\s+wp_sign\s*=\s*'([^']+)'/);
+        const wpSign = wpSignMatch ? wpSignMatch[1] : null;
+        const finalSign = wpSign || sign;
+        
         // 🔑 websign/websignkey 提取对齐前端parseLanzouFrontend：
         // 原正则 /'([a-zA-Z0-9]{4})'/ 会误匹配JS中的 'post'/'sign'/'json' 等无关4位字符串，
         // 导致POST参数错误 → 蓝奏云返回"已超时"
@@ -9328,18 +9406,13 @@ class LanzouParser {
         const kdnsMatch = cleanedData.match(/var\s+kdns\s*=\s*(\d+)/);
         if (kdnsMatch) kdns = kdnsMatch[1];
 
-        // 🔑 POST参数统一为前端parseLanzouFrontend验证可用的5字段格式：
-        // {action, sign, p, websign, websignkey}
-        // 蓝奏云2026-08新版对参数集合敏感，后端代理模式需与前端一致。
-        // 之前按"有无密码"分3种参数集合（带密码缺websign/websignkey、加kd/ves/signs），
-        // 导致大部分请求被蓝奏云风控返回 {"zt":0,"inf":"已超时"}。
-        const postData = {
-            action: 'downprocess',
-            sign: sign,
-            p: pwd || '',
-            websign: websign || '',
-            websignkey: websignkey || ''
-        };
+        // 🔑 POST参数区分密码/免密码（与独立脚本一致）
+        const needPassword = cleanedData.includes("document.getElementById('pwd').value;") ||
+            cleanedData.includes("提取码") ||
+            cleanedData.includes("请输入密码");
+        const postData = needPassword
+            ? { action: 'downprocess', sign: finalSign, p: pwd, kd: kdns }
+            : { action: 'downprocess', websignkey: ajaxdata, signs: ajaxdata, sign: finalSign, websign: '', kd: kdns, ves: '1' };
         
         const shareId = id.match(/([a-zA-Z0-9]+)$/)?.[1] || id;
         
@@ -9379,8 +9452,9 @@ class LanzouParser {
                         'X-Forwarded-For': lanzouRandIP(),
                         'CLIENT-IP': lanzouRandIP()
                     };
+                    const reqUrl = buildAjaxRequestUrl(tryDomain);
                     const resp = await this.request(
-                        `https://${tryDomain}/${ajaxPath}`,
+                        reqUrl,
                         'POST',
                         postData,
                         cacheHeaders,
@@ -9437,7 +9511,7 @@ class LanzouParser {
             try {
                 console.log('[*] 尝试ajax接口域名:', tryDomain);
                 const resp = await this.request(
-                    `https://${tryDomain}/${ajaxPath}`,
+                    buildAjaxRequestUrl(tryDomain),
                     'POST',
                     postData,
                     baseHeaders,
@@ -9501,7 +9575,7 @@ class LanzouParser {
 
                             try {
                                 const retryResp = await this.request(
-                                    `https://${tryDomain}/${ajaxPath}`,
+                                    buildAjaxRequestUrl(tryDomain),
                                     'POST', postData,
                                     { 'User-Agent': ua, 'Cookie': wafCookie,
                                       'X-Forwarded-For': lanzouRandIP(), 'CLIENT-IP': lanzouRandIP() },
@@ -9560,7 +9634,7 @@ class LanzouParser {
             console.log('[*] 所有标准域名失败，尝试原始域名:', usedDomain);
             try {
                 const resp = await this.request(
-                    `https://${usedDomain}/${ajaxPath}`,
+                    buildAjaxRequestUrl(usedDomain),
                     'POST',
                     postData,
                     baseHeaders,
@@ -9586,7 +9660,7 @@ class LanzouParser {
                             if (pageCookie) wafCookie = `${pageCookie}; ${wafCookie}`;
 
                             const retryResp = await this.request(
-                                `https://${usedDomain}/${ajaxPath}`,
+                                buildAjaxRequestUrl(usedDomain),
                                 'POST', postData,
                                 { 'User-Agent': ua, 'Cookie': wafCookie,
                                   'X-Forwarded-For': lanzouRandIP(), 'CLIENT-IP': lanzouRandIP() },
@@ -9627,7 +9701,7 @@ class LanzouParser {
             for (const tryDomain of postDomains) {
                 try {
                     const mobileResp = await this.request(
-                        `https://${tryDomain}/${ajaxPath}`,
+                        buildAjaxRequestUrl(tryDomain),
                         'POST',
                         postData,
                         {
@@ -9667,7 +9741,7 @@ class LanzouParser {
 
                                 try {
                                     const retryM = await this.request(
-                                        `https://${tryDomain}/${ajaxPath}`,
+                                        buildAjaxRequestUrl(tryDomain),
                                         'POST', postData,
                                         { 'User-Agent': mua, 'Cookie': mwafCookie,
                                           'X-Forwarded-For': lanzouRandIP(), 'CLIENT-IP': lanzouRandIP() },
@@ -12991,24 +13065,28 @@ class Cloud189Parser {
         }
         
         try {
-            console.log(`\n[Cloud189]获取webSessionKey...`);
+            // Step 1: 获取webSessionKey
+            console.log(`\n[Cloud189] [Step 1/5] 获取webSessionKey...`);
             const webSessionKey = await this.getWebSessionKey();
             if (!webSessionKey) {
                 console.log('[!] [Cloud189] 获取webSessionKey失败，无法继续转存方案');
                 return null;
             }
             
-            console.log(`\n[Cloud189]使用根目录(-11)作为目标文件夹...`);
+            // Step 2: 使用根目录(-11)作为目标文件夹
+            console.log(`\n[Cloud189] [Step 2/5] 使用根目录(-11)作为目标文件夹...`);
             const targetFolderId = '-11';
             
-            console.log(`\n[Cloud189]创建转存任务...`);
+            // Step 3: 创建转存任务
+            console.log(`\n[Cloud189] [Step 3/5] 创建转存任务...`);
             const taskId = await this.saveShareFile(shareId, fileId, fileName, targetFolderId);
             if (!taskId) {
                 console.log('[!] [Cloud189] 创建转存任务失败，无法继续转存方案');
                 return null;
             }
             
-            console.log(`\n[Cloud189]等待转存任务完成...`);
+            // Step 3.5: 等待转存任务完成 (最多等待30秒)
+            console.log(`\n[Cloud189] [Step 3.5/5] 等待转存任务完成...`);
             let taskResult = null;
             for (let i = 0; i < 15; i++) {
                 await new Promise(r => setTimeout(r, 2000));
@@ -13029,12 +13107,14 @@ class Cloud189Parser {
                 return null;
             }
             
-            console.log(`\n[Cloud189]使用App签名下载转存后的文件...`);
+            // Step 4: 使用App签名下载转存后的文件
+            console.log(`\n[Cloud189] [Step 4/5] 使用App签名下载转存后的文件...`);
             const downloadUrl = await this.getDownloadUrlByAppSign(fileId);
             if (downloadUrl) {
                 console.log(`[✓] [Cloud189] 转存方案成功! 获取到下载链接`);
                 
-                console.log(`\n[Cloud189]清理转存文件...`);
+                // Step 5: 删除转存的文件 (对齐Go项目batchDeleteFile.action)
+                console.log(`\n[Cloud189] [Step 5/5] 清理转存文件...`);
                 await this.deleteFile(fileId);
                 
                 return downloadUrl;
@@ -13578,7 +13658,7 @@ class Cloud189Parser {
             let openEDomainCookies = '';
             const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36 Edg/147.0.0.0';
 
-            console.log('[Cloud189 QR]访问unifyLoginForPC获取登录参数 (redirect=manual, 捕获每一跳cookie)...');
+            console.log('[Cloud189 QR] Step1: 访问unifyLoginForPC获取登录参数 (redirect=manual, 捕获每一跳cookie)...');
             try {
                 let currentUrl = 'https://cloud.189.cn/api/portal/unifyLoginForPC.action?appId=8025431004&clientType=10020&returnURL=https://m.cloud.189.cn/zhuanti/2020/loginErrorPc/index.html&timeStamp=' + Date.now();
                 let html = '';
@@ -13728,7 +13808,7 @@ class Cloud189Parser {
             const userFinger = String(Math.floor(Math.random() * 9000000000) + 1000000000);
             console.log('[Cloud189 QR] userFinger:', userFinger);
 
-            console.log('[Cloud189 QR]获取二维码UUID (携带已累积的cookies)...');
+            console.log('[Cloud189 QR] Step2: 获取二维码UUID (携带已累积的cookies)...');
             const uuidHeaders = {
                 'Content-Type': 'application/x-www-form-urlencoded',
                 'Origin': 'https://open.e.189.cn',
@@ -16228,7 +16308,7 @@ function admin(isLoggedIn, errorMessage = '') {
     }
 }
 
-function index() {
+function index(env) {
     return '<!DOCTYPE html>\n' +
         '<html lang="zh-CN">\n' +
         '<head>\n' +
@@ -16889,6 +16969,7 @@ function index() {
         '            let timerInterval = null, pollInterval = null, qrDone = false, pollingInFlight = false;\n' +
         '            \n' +
         '            try {\n' +
+        '                // Step1: 调用后端API获取二维码\n' +
         '                const resp = await fetch("/?action=" + cfg.qrAction);\n' +
         '                const result = await resp.json();\n' +
         '                \n' +
@@ -16939,6 +17020,7 @@ function index() {
         '                }\n' +
         '                statusEl.textContent = "请使用手机" + (panNames[panType] || "") + "APP扫码登录";\n' +
         '                \n' +
+        '                // Step2: 开始倒计时\n' +
         '                let countdown = expiresIn;\n' +
         '                timerInterval = setInterval(() => {\n' +
         '                    countdown--;\n' +
@@ -16952,6 +17034,7 @@ function index() {
         '                    }\n' +
         '                }, 1000);\n' +
         '                \n' +
+        '                // Step3: 轮询登录状态\n' +
         '                const pollNow = async () => {\n' +
         '                    if (qrDone || pollingInFlight) return;\n' +
         '                    pollingInFlight = true;\n' +
@@ -20557,6 +20640,79 @@ function index() {
         '            <div class="modal-actions" id="modalActions"></div>\n' +
         '        </div>\n' +
         '    </div>\n' +
+        (function buildAnnouncement(env) {
+            // 服务器端拼装公告弹窗；env 缺省时不输出任何内容
+            try {
+                const rawEnabled = String(env && env.ANNOUNCEMENT_ENABLED || '').trim().toLowerCase();
+                console.log('[公告] raw env keys:', env ? Object.keys(env).filter(k => k.includes('ANNOUNCE')).join(',') : 'no env');
+                console.log('[公告] ANNOUNCEMENT_ENABLED raw:', JSON.stringify(env && env.ANNOUNCEMENT_ENABLED), '| normalized:', rawEnabled);
+                const cfg = env && typeof env === 'object' ? {
+                    enabled: rawEnabled === 'true' || rawEnabled === '1' || rawEnabled === 'yes' || rawEnabled === 'on',
+                    title: env.ANNOUNCEMENT_TITLE || '',
+                    content: env.ANNOUNCEMENT_CONTENT || '',
+                    link: env.ANNOUNCEMENT_LINK || '',
+                    linkText: env.ANNOUNCEMENT_LINK_TEXT || '查看详情',
+                    dismissHours: parseInt(env.ANNOUNCEMENT_DISMISS_HOURS) || 24
+                } : null;
+                console.log('[公告] cfg:', cfg ? JSON.stringify({enabled: cfg.enabled, title: cfg.title, contentLen: cfg.content.length, hasLink: !!cfg.link}) : null);
+                if (!cfg || !cfg.enabled || !cfg.content) {
+                    console.log('[公告] 不渲染: enabled=', cfg?.enabled, 'contentLen=', cfg?.content?.length);
+                    return '';
+                }
+                // 转义双引号，避免破坏 HTML 属性
+                const esc = (str) => String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+                // content 保留换行：前端用 white-space: pre-line 渲染
+                const contentAttr = esc(cfg.content).replace(/\\\\n/g,'\\n');
+                const title = esc(cfg.title || '公告');
+                const link = esc(cfg.link);
+                const linkText = esc(cfg.linkText);
+                const dismissHours = parseInt(cfg.dismissHours) || 24;
+                // 将字面 \n 转为真换行，再做 HTML 转义；white-space:pre-line 渲染真换行
+                const contentHtml = esc(cfg.content.replace(/\\n/g, '\n'));
+                const linkHtml = link ? '<a href="' + link + '" target="_blank" rel="noopener" class="ann-btn ann-btn-primary">' + linkText + '</a>' : '';
+                return '' +
+        '    <!-- 公告弹窗 -->\n' +
+        '    <div id="annOverlay" class="ann-overlay">\n' +
+        '        <div class="ann-modal">\n' +
+        '            <div class="ann-header">\n' +
+        '                <span class="ann-icon"><i class="fa fa-bullhorn"></i></span>\n' +
+        '                <span class="ann-title">' + title + '</span>\n' +
+        '                <button class="ann-close" onclick="closeAnnouncement()">&times;</button>\n' +
+        '            </div>\n' +
+        '            <div class="ann-body">' + contentHtml + '</div>\n' +
+        '            <div class="ann-footer">' + linkHtml + '<button class="ann-btn ann-btn-ghost" onclick="closeAnnouncement()">我知道了</button></div>\n' +
+        '        </div>\n' +
+        '    </div>\n' +
+        '    <style>\n' +
+        '        .ann-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);z-index:10001;justify-content:center;align-items:center;padding:20px}\n' +
+        '        .ann-overlay.active{display:flex}\n' +
+        '        .ann-modal{background:#fff;border-radius:16px;max-width:460px;width:100%;box-shadow:0 12px 48px rgba(0,0,0,0.25);overflow:hidden;animation:annPop .25s ease}\n' +
+        '        @keyframes annPop{from{opacity:0;transform:translateY(16px) scale(.96)}to{opacity:1;transform:none}}\n' +
+        '        .ann-header{display:flex;align-items:center;gap:10px;padding:18px 22px;border-bottom:1px solid #f0f0f0}\n' +
+        '        .ann-icon{width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,#6366f1,#8b5cf6);display:flex;align-items:center;justify-content:center;color:#fff;font-size:16px;flex-shrink:0}\n' +
+        '        .ann-title{font-size:17px;font-weight:700;color:#1a1a2e;flex:1}\n' +
+        '        .ann-close{background:none;border:none;font-size:24px;color:#999;cursor:pointer;line-height:1;padding:0 4px}\n' +
+        '        .ann-close:hover{color:#333}\n' +
+        '        .ann-body{padding:20px 22px;font-size:14px;line-height:1.7;color:#374151;white-space:pre-line;word-break:break-word;max-height:50vh;overflow-y:auto}\n' +
+        '        .ann-footer{display:flex;gap:10px;justify-content:flex-end;padding:14px 22px;border-top:1px solid #f0f0f0}\n' +
+        '        .ann-btn{padding:8px 18px;border-radius:8px;font-size:14px;font-weight:500;cursor:pointer;border:none;transition:all .2s}\n' +
+        '        .ann-btn-primary{background:#6366f1;color:#fff}\n' +
+        '        .ann-btn-primary:hover{background:#4f46e5}\n' +
+        '        .ann-btn-ghost{background:#f3f4f6;color:#374151}\n' +
+        '        .ann-btn-ghost:hover{background:#e5e7eb}\n' +
+        '        @media(max-width:480px){.ann-modal{max-width:94%}.ann-body{max-height:40vh}}\n' +
+        '    </style>\n' +
+        '    <script>\n' +
+        '        (function(){\n' +
+        '            window.closeAnnouncement=function(){var o=document.getElementById("annOverlay");if(o)o.classList.remove("active")};\n' +
+        '            (function(){var o=document.getElementById("annOverlay");if(o){setTimeout(function(){o.classList.add("active")},300)}})();\n' +
+        '        })();\n' +
+        '    </script>\n';
+            } catch (e) {
+                console.log('[公告] 拼装异常:', e.message);
+                return '';
+            }
+        })(env) +
         '</body>\n' +
         '</html>';
 }
@@ -21934,9 +22090,15 @@ async function handleMainRequest(request, env, ctx) {
 
                     const cleaned = js.replace(/\/\/.*|\/\*[\s\S]*?\*\//g, '').replace(/function woio[\s\S]*?}/g, '');
 
-                    // 提取file ID
+                    // 提取绝对ajax接口和file ID
+                    const rawAjaxLink = (js || '').replace(/\\\//g, '/');
+                    const absAjaxLinkMatch = rawAjaxLink.match(/['"]((?:https?:)?\/\/[^'"]+\/ajax(?:file|m)\.php\?file=\d+)['"]/);
+                    const absoluteAjaxUrlLink = absAjaxLinkMatch
+                        ? (absAjaxLinkMatch[1].startsWith('//') ? 'https:' + absAjaxLinkMatch[1] : absAjaxLinkMatch[1])
+                        : null;
                     const fidMatch = cleaned.match(/file=(\d+)/) || js.match(/file=(\d+)/);
-                    const fileid = fidMatch ? parseInt(fidMatch[1]) : null;
+                    const fidMatchAbsolute = absAjaxLinkMatch ? absAjaxLinkMatch[1].match(/file=(\d+)/) : null;
+                    const fileid = fidMatchAbsolute ? parseInt(fidMatchAbsolute[1]) : (fidMatch ? parseInt(fidMatch[1]) : null);
                     info.fid = fileid;
 
 
@@ -21998,6 +22160,8 @@ async function handleMainRequest(request, env, ctx) {
 
                     console.log('[蓝奏云] 参数提取完成: fileid=', fileid, ' sign=', sign?.substring(0,15) + '...', ' ajaxdata=', ajaxdata, ' kdns=', kdns);
 
+                    const ajaxPathLinkMatch = cleaned.match(/(?:^|\/)(ajax(?:m|file)\.php\?file=\d+)/);
+                    const ajaxPathLink = ajaxPathLinkMatch ? ajaxPathLinkMatch[1] : `ajaxfile.php?file=${fileid}`;
                     const ajaxDomains = ['www.lanzoux.com', 'www.lanzouu.com', 'www.lanzouy.com', 'www.lanzoui.com', 'www.lanzouw.com', 'www.lanzouf.com'];
 
                     let extractedPostData = null;
@@ -22076,11 +22240,13 @@ async function handleMainRequest(request, env, ctx) {
 
                     let ajaxText = null;
                     let ajaxDomain = null;
+                    let ajaxRequestUrlUsed = absoluteAjaxUrlLink || '';
 
                     for (const tryDom of ajaxDomains) {
                         try {
-                            console.log('[蓝奏云] 尝试ajaxm.php域名:', tryDom);
-                            const resp = await fetch(`https://${tryDom}/ajaxm.php?file=${fileid}`, {
+                            const ajaxRequestUrl = absoluteAjaxUrlLink || `https://${tryDom}/${ajaxPathLink}`;
+                            console.log('[蓝奏云] 尝试ajax接口:', ajaxRequestUrl);
+                            const resp = await fetch(ajaxRequestUrl, {
                                 method: 'POST',
                                 headers: { 
                                     'User-Agent': DESKTOP_UA, 
@@ -22096,7 +22262,8 @@ async function handleMainRequest(request, env, ctx) {
                             if (text && !text.includes('error code:') && text.length > 5) {
                                 ajaxText = text;
                                 ajaxDomain = tryDom;
-                                console.log('[蓝奏云] ajaxm.php成功, 域名:', tryDom, ' 长度:', text.length);
+                                ajaxRequestUrlUsed = ajaxRequestUrl;
+                                console.log('[蓝奏云] ajax接口成功, 域名:', tryDom, ' 长度:', text.length);
                                 break;
                             } else {
                                 console.log('[蓝奏云] 域名', tryDom, '失败:', text.substring(0, 60));
@@ -22110,7 +22277,8 @@ async function handleMainRequest(request, env, ctx) {
                         // 最后尝试usedDomain
                         console.log('[蓝奏云] 所有标准域名失败，尝试原始域名:', usedDomain);
                         try {
-                            const resp = await fetch(`https://${usedDomain}/ajaxm.php?file=${fileid}`, {
+                            const ajaxRequestUrl = absoluteAjaxUrlLink || `https://${usedDomain}/${ajaxPathLink}`;
+                            const resp = await fetch(ajaxRequestUrl, {
                                 method: 'POST',
                                 headers: { 
                                     'User-Agent': DESKTOP_UA, 
@@ -22124,14 +22292,15 @@ async function handleMainRequest(request, env, ctx) {
                             });
                             ajaxText = await resp.text();
                             ajaxDomain = usedDomain;
+                            ajaxRequestUrlUsed = ajaxRequestUrl;
                         } catch (e) {
                             return new Response(JSON.stringify({
-                                code: 502, msg: 'ajaxm.php所有域名均失败', success: false, data: null
+                                code: 502, msg: 'ajax接口所有域名均失败', success: false, data: null
                             }), { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' } });
                         }
                     }
 
-                    console.log('[蓝奏云] ajaxm.php响应长度:', ajaxText.length, ', 前200字符:', ajaxText.substring(0, 200));
+                    console.log('[蓝奏云] ajax接口响应长度:', ajaxText.length, ', 前200字符:', ajaxText.substring(0, 200));
 
                     if (ajaxText.includes("var arg1='") || ajaxText.includes('<html>') || ajaxText.includes('<script>')) {
                         console.log('[蓝奏云] 检测到acw_sc__v2反爬保护，计算Cookie重试...');
@@ -22140,7 +22309,8 @@ async function handleMainRequest(request, env, ctx) {
                             const acwValue = acwScV2(argMatch[1]);
                             console.log('[蓝奏云] acw_sc__v2计算成功, 长度:', acwValue.length);
                             
-                            const retryResp = await fetch(`https://${ajaxDomain}/ajaxm.php?file=${fileid}`, {
+                            const retryUrl = ajaxRequestUrlUsed || absoluteAjaxUrlLink || `https://${ajaxDomain}/${ajaxPathLink}`;
+                            const retryResp = await fetch(retryUrl, {
                                 method: 'POST',
                                 headers: { 
                                     'User-Agent': DESKTOP_UA, 
@@ -22153,7 +22323,7 @@ async function handleMainRequest(request, env, ctx) {
                                 body: postData.toString()
                             });
                             ajaxText = await retryResp.text();
-                            console.log('[蓝奏云] 重试后ajaxm.php响应长度:', ajaxText.length, ', 前200字符:', ajaxText.substring(0, 200));
+                            console.log('[蓝奏云] 重试后ajax接口响应长度:', ajaxText.length, ', 前200字符:', ajaxText.substring(0, 200));
                         } else {
                             console.log('[蓝奏云] 无法提取arg1参数');
                         }
@@ -26232,7 +26402,7 @@ function feijiDoLogin() {
                     const ALIYUN_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36';
                     const umidToken = 'c' + Date.now() + Math.floor(1000 + Math.random() * 9000);
                     
-                    console.log('[阿里云盘扫码]获取CSRF Token...');
+                    console.log('[阿里云盘扫码] Step1: 获取CSRF Token...');
                     const initParams = new URLSearchParams({
                         lang: 'zh_cn', appName: 'aliyun_drive', appEntrance: 'web_default',
                         styleType: 'auto', bizParams: '', notLoadSsoView: 'false',
@@ -26261,7 +26431,7 @@ function feijiDoLogin() {
                     }
                     console.log('[阿里云盘扫码] CSRF Token:', csrfToken);
                     
-                    console.log('[阿里云盘扫码]生成二维码...');
+                    console.log('[阿里云盘扫码] Step2: 生成二维码...');
                     const genParams = new URLSearchParams({
                         appName: 'aliyun_drive', fromSite: '52', appEntrance: 'web_default',
                         _csrf_token: csrfToken, umidToken: umidToken,
@@ -28508,7 +28678,7 @@ function feijiDoLogin() {
         }
 
         if (!targetUrl && !action) {
-            return new Response(index(), {
+            return new Response(index(env), {
                 headers: {
                     'Content-Type': 'text/html; charset=utf-8',
                     'Access-Control-Allow-Origin': '*'
@@ -29106,6 +29276,16 @@ function feijiDoLogin() {
                                         const fileid = fidMatch ? parseInt(fidMatch[1]) : null;
 
                                         if (fileid) {
+                                            const rawAjaxCache = (js || '').replace(/\\\//g, '/');
+                                            const absAjaxCacheMatch = rawAjaxCache.match(/['"]((?:https?:)?\/\/[^'"]+\/ajax(?:file|m)\.php\?file=\d+)['"]/);
+                                            const absoluteAjaxUrlCache = absAjaxCacheMatch
+                                                ? (absAjaxCacheMatch[1].startsWith('//') ? 'https:' + absAjaxCacheMatch[1] : absAjaxCacheMatch[1])
+                                                : null;
+                                            const ajaxPathCacheMatch = cleaned.match(/(?:^|\/)(ajax(?:m|file)\.php\?file=\d+)/);
+                                            const ajaxPathCache = ajaxPathCacheMatch ? ajaxPathCacheMatch[1] : `ajaxfile.php?file=${fileid}`;
+                                            const ajaxUrlCache = absoluteAjaxUrlCache || `https://${usedDomain}/${ajaxPathCache}`;
+                                            console.log('[二次解析-缓存] ajax接口:', ajaxUrlCache);
+
                                             let sign = null;
                                             let ajaxdata = null;
                                             let kdns = '1';
@@ -29206,7 +29386,7 @@ function feijiDoLogin() {
                                                     }).toString();
                                                 }
 
-                                                const ajaxResp = await fetch(`https://${usedDomain}/ajaxm.php?file=${fileid}`, {
+                                                const ajaxResp = await fetch(ajaxUrlCache, {
                                                     method: 'POST',
                                                     headers: {
                                                         'User-Agent': DESKTOP_UA,
@@ -29223,7 +29403,7 @@ function feijiDoLogin() {
                                                 });
                                                 const ajaxText = await ajaxResp.text();
 
-                                                console.log('[二次解析-缓存] ajaxm.php响应长度:', ajaxText.length, ', 内容:', ajaxText.substring(0, 300));
+                                                console.log('[二次解析-缓存] ajax接口响应长度:', ajaxText.length, ', 内容:', ajaxText.substring(0, 300));
 
                                                 let json;
                                                 try {
@@ -30571,8 +30751,9 @@ function feijiDoLogin() {
                     let parseResult = null;
                     let folderResult = null;
                     
+                    // Step 1: 尝试单文件解析
                     try {
-                        console.log('[路由]尝试单文件解析 (parse方法)...');
+                        console.log('[路由] Step1: 尝试单文件解析 (parse方法)...');
                         parseResult = await ucParser.parse(targetUrl, pwd);
                         console.log('[路由]  单文件解析完成:', {
                             success: parseResult.success,
@@ -30585,8 +30766,9 @@ function feijiDoLogin() {
                         parseResult = { code: 500, msg: '单文件解析异常: ' + parseErr.message, success: false, data: null };
                     }
                     
+                    // Step 2: 无论单文件解析是否成功，都尝试文件夹解析
                     try {
-                        console.log('[路由]尝试文件夹解析 (UC_parseFolder方法)...');
+                        console.log('[路由] Step2: 尝试文件夹解析 (UC_parseFolder方法)...');
                         folderResult = await ucParser.UC_parseFolder(targetUrl, pwd, '0');
                         console.log('[路由]  文件夹解析完成:', {
                             success: folderResult.success,
@@ -32181,7 +32363,7 @@ function feijiDoLogin() {
 
                         try {
                             if (memShareId && authPwd) {
-                                console.log('[二次解析-下载]GET分享页(使用Session)...');
+                                console.log('[二次解析-下载] Step1: GET分享页(使用Session)...');
                                 const shareResp = await session.get(`https://${authDomain}/${memShareId}`, {
                                     headers: { 'Referer': `https://${authDomain}/` }
                                 });
@@ -32205,7 +32387,7 @@ function feijiDoLogin() {
 
                                     await new Promise(r => setTimeout(r, 500));
 
-                                    console.log('[二次解析-下载]POST filemoreajax(使用Session)...');
+                                    console.log('[二次解析-下载] Step2: POST filemoreajax(使用Session)...');
                                     const flData = new URLSearchParams({
                                         lx: '2', fid: folderFid, uid: folderUid,
                                         pg: '1', rep: '0', t: folderT, k: folderK, pwd: authPwd
@@ -32243,7 +32425,7 @@ function feijiDoLogin() {
                         const domainsToTry = ['www.lanzoux.com', 'www.lanzouu.com', 'www.lanzouy.com', 'www.lanzouf.com', domain, 'www.lanzoui.com', 'www.lanzouw.com'];
                         for (const tryDomain of domainsToTry) {
                             try {
-                                console.log('[二次解析-下载]GET文件页(使用Session), 域名:', tryDomain);
+                                console.log('[二次解析-下载] Step3: GET文件页(使用Session), 域名:', tryDomain);
                                 const resp = await session.get(`https://${tryDomain}/${fileId}`, {
                                     headers: { 'Referer': `https://${tryDomain}/` }
                                 });
@@ -32355,6 +32537,16 @@ function feijiDoLogin() {
                                 data: null
                             }), { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' } });
                         }
+
+                        const rawAjaxDown = (js || '').replace(/\\\//g, '/');
+                        const absAjaxDownMatch = rawAjaxDown.match(/['"]((?:https?:)?\/\/[^'"]+\/ajax(?:file|m)\.php\?file=\d+)['"]/);
+                        const absoluteAjaxUrlDown = absAjaxDownMatch
+                            ? (absAjaxDownMatch[1].startsWith('//') ? 'https:' + absAjaxDownMatch[1] : absAjaxDownMatch[1])
+                            : null;
+                        const ajaxPathDownMatch = cleaned.match(/(?:^|\/)(ajax(?:m|file)\.php\?file=\d+)/);
+                        const ajaxPathDown = ajaxPathDownMatch ? ajaxPathDownMatch[1] : `ajaxfile.php?file=${fileid}`;
+                        const ajaxUrlDown = absoluteAjaxUrlDown || `https://${usedDomain}/${ajaxPathDown}`;
+                        console.log('[二次解析-下载] ajax接口:', ajaxUrlDown);
 
                         // 检查密码
                         if (cleaned.includes("document.getElementById('pwd').value;") && !pwd) {
@@ -32486,15 +32678,15 @@ function feijiDoLogin() {
                             console.log('[二次解析-下载] 回退到硬编码有密码格式');
                         }
 
-                        console.log('[二次解析-下载] POST ajaxm.php(使用Session)...');
-                        const ajaxResp = await session.post(`https://${usedDomain}/ajaxm.php?file=${fileid}`, ajaxPostBody, {
+                        console.log('[二次解析-下载] Step4: POST ajax接口(使用Session)...');
+                        const ajaxResp = await session.post(ajaxUrlDown, ajaxPostBody, {
                             headers: { 
                                 'Referer': `https://${usedDomain}/`
                             }
                         });
                         let ajaxText = await ajaxResp.text();
 
-                        console.log('[二次解析-下载] ajaxm.php响应长度:', ajaxText.length, ', 内容:', ajaxText.substring(0, 300));
+                        console.log('[二次解析-下载] ajax接口响应长度:', ajaxText.length, ', 内容:', ajaxText.substring(0, 300));
                         console.log('[二次解析-下载] 当前Session Cookie:', session.getCookieString());
 
                         // 解析响应
@@ -32515,8 +32707,8 @@ function feijiDoLogin() {
                             const retryBody = ajaxPostBody + '&p=' + encodeURIComponent(pwd);
                             console.log('[二次解析-下载] 重试POST body(添加p参数):', retryBody.substring(0, 100) + '...');
                             
-                            console.log('[二次解析-下载] POST重试(使用Session)...');
-                            const retryResp = await session.post(`https://${usedDomain}/ajaxm.php?file=${fileid}`, retryBody, {
+                            console.log('[二次解析-下载] Step5: POST重试(使用Session)...');
+                            const retryResp = await session.post(ajaxUrlDown, retryBody, {
                                 headers: { 'Referer': `https://${usedDomain}/` }
                             });
                             ajaxText = await retryResp.text();
@@ -32646,7 +32838,7 @@ function feijiDoLogin() {
 
                         try {
                             if (memShareId && authPwd) {
-                                console.log('[二次解析-信息]GET分享页(使用Session)...');
+                                console.log('[二次解析-信息] Step1: GET分享页(使用Session)...');
                                 const shareResp = await session.get(`https://${authDomain}/${memShareId}`, {
                                     headers: { 'Referer': `https://${authDomain}/` }
                                 });
@@ -32670,7 +32862,7 @@ function feijiDoLogin() {
 
                                     await new Promise(r => setTimeout(r, 500));
 
-                                    console.log('[二次解析-信息]POST filemoreajax(使用Session)...');
+                                    console.log('[二次解析-信息] Step2: POST filemoreajax(使用Session)...');
                                     const flData = new URLSearchParams({
                                         lx: '2', fid: folderFid, uid: folderUid,
                                         pg: '1', rep: '0', t: folderT, k: folderK, pwd: authPwd
@@ -32704,7 +32896,7 @@ function feijiDoLogin() {
                         const domainsToTry = ['www.lanzoux.com', 'www.lanzouu.com', 'www.lanzouy.com', 'www.lanzouf.com', domain, 'www.lanzoui.com', 'www.lanzouw.com'];
                         for (const tryDomain of domainsToTry) {
                             try {
-                                console.log('[二次解析-信息]GET文件页(使用Session), 域名:', tryDomain);
+                                console.log('[二次解析-信息] Step3: GET文件页(使用Session), 域名:', tryDomain);
                                 const resp = await session.get(`https://${tryDomain}/${fileId}`, {
                                     headers: { 'Referer': `https://${tryDomain}/` }
                                 });
@@ -32910,6 +33102,16 @@ function feijiDoLogin() {
                                                 file_basic_info: matchedFile
                                             };
                                         } else {
+                                            const rawAjaxInfo = (js || '').replace(/\\\//g, '/');
+                                            const absAjaxInfoMatch = rawAjaxInfo.match(/['"]((?:https?:)?\/\/[^'"]+\/ajax(?:file|m)\.php\?file=\d+)['"]/);
+                                            const absoluteAjaxUrlInfo = absAjaxInfoMatch
+                                                ? (absAjaxInfoMatch[1].startsWith('//') ? 'https:' + absAjaxInfoMatch[1] : absAjaxInfoMatch[1])
+                                                : null;
+                                            const ajaxPathInfoMatch = cleaned.match(/(?:^|\/)(ajax(?:m|file)\.php\?file=\d+)/);
+                                            const ajaxPathInfo = ajaxPathInfoMatch ? ajaxPathInfoMatch[1] : `ajaxfile.php?file=${fileid}`;
+                                            const ajaxUrlInfo = absoluteAjaxUrlInfo || `https://${usedDomain}/${ajaxPathInfo}`;
+                                            console.log('[二次解析-信息] ajax接口:', ajaxUrlInfo);
+
                                             // 检查密码
                                             if (cleaned.includes("document.getElementById('pwd').value;") && !pwd) {
                                                 result = {
@@ -33047,18 +33249,18 @@ function feijiDoLogin() {
                                                         console.log('[二次解析-信息] JS前500字符(用于调试):', jsSnippet);
                                                     }
 
-                                                    console.log('[二次解析-信息]POST ajaxm.php(使用Session)...');
-                                                    const ajaxResp = await session.post(`https://${usedDomain}/ajaxm.php?file=${fileid}`, ajaxPostBody, {
+                                                    console.log('[二次解析-信息] Step4: POST ajax接口(使用Session)...');
+                                                    const ajaxResp = await session.post(ajaxUrlInfo, ajaxPostBody, {
                                                         headers: {
                                                             'Origin': `https://${usedDomain}`,
                                                             'Accept': '*/*',
                                                             'Referer': `https://${usedDomain}/${fileId}`
                                                         }
                                                     });
-                                                    console.log('[诊断] ajaxm.php POST body:', ajaxPostBody?.substring(0, 200));
+                                                    console.log('[诊断] ajax接口 POST body:', ajaxPostBody?.substring(0, 200));
                                                     const ajaxText = await ajaxResp.text();
 
-                                                    console.log('[二次解析-信息] ajaxm.php响应长度:', ajaxText.length, ', 内容:', ajaxText.substring(0, 300));
+                                                    console.log('[二次解析-信息] ajax接口响应长度:', ajaxText.length, ', 内容:', ajaxText.substring(0, 300));
 
                                                     // 解析响应
                                                     let json;
@@ -33108,8 +33310,8 @@ function feijiDoLogin() {
 
                                                             await new Promise(r => setTimeout(r, 1000));
 
-                                                            console.log('[二次解析-信息]POST重试(使用Session)...');
-                                                            const retryResp = await session.post(`https://${usedDomain}/ajaxm.php?file=${fileid}`, retryBody, {
+                                                            console.log('[二次解析-信息] Step5: POST重试(使用Session)...');
+                                                            const retryResp = await session.post(ajaxUrlInfo, retryBody, {
                                                                 headers: {
                                                                     'Origin': `https://${usedDomain}`,
                                                                     'Accept': '*/*',
@@ -33398,4 +33600,3 @@ export default {
         return handleMainRequest(request, env, ctx);
     }
 };
-
