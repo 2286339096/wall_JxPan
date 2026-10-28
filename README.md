@@ -25,15 +25,17 @@
 
 ## 部署
 
-见 [DEPLOY.md](DEPLOY.md)。直接上传 `jxpan-edgeone-parse-only.zip`或使用 EdgeOne CLI部署，无需 Git仓库。两种平台使用同一份 `functions/[[default]].js`：
+见 [DEPLOY.md](DEPLOY.md)。直接上传 `jxpan-edgeone-parse-only.zip`或使用 EdgeOne CLI部署，无需 Git仓库。两个平台使用不同的入口文件名：
 
-- 腾讯 EdgeOne Pages：`onRequest(context)`
-- 阿里云 ESA：`default.fetch(request, env, ctx)`
+-腾讯 EdgeOne Pages：`edge-functions/[[...default]].js`
+-阿里云 ESA：`functions/[[default]].js`
 
-## 目录
+两种入口都导出 `onRequest(context)`与 `default.fetch(request, env, ctx)`。
 
 ```text
-functions/[[default]].js #可直接部署的 bundle
+functions/[[default]].js # ESA入口 bundle
+edge-functions/[[...default]].js # EdgeOne全路径入口 bundle
+index.html #纯解析首页
 src/eo-shim.js #纯解析入口与禁用路由
 test/parse-only.test.mjs #无存储冒烟测试
 build.mjs #上游更新后重新生成 bundle
@@ -58,6 +60,8 @@ node test/parse-only.test.mjs
 ```powershell
 node build.mjs
 ```
+
+构建会同时生成 `functions/`、`edge-functions/`和只含运行文件的 `deploy-edgeone/`。**不要把仓库根目录直接上传到 EdgeOne**，否则源码、文档和 ZIP文件可能被当作静态资源公开。
 
 ## 说明
 

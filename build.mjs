@@ -84,7 +84,17 @@ const out = src + '\n\n' + shim + '\n';
 const outDir = path.join(here, 'functions');
 fs.mkdirSync(outDir, { recursive: true });
 fs.writeFileSync(path.join(outDir, '[[default]].js'), out);
+const edgeOneOutDir = path.join(here, 'edge-functions');
+fs.mkdirSync(edgeOneOutDir, { recursive: true });
+fs.writeFileSync(path.join(edgeOneOutDir, '[[...default]].js'), out);
 
 console.log('构建完成: functions/[[default]].js  (' + (out.length / 1024).toFixed(0) + ' KB)');
+const deployDir = path.join(here, 'deploy-edgeone');
+const deployFunctionsDir = path.join(deployDir, 'edge-functions');
+fs.rmSync(deployDir, { recursive: true, force: true });
+fs.mkdirSync(deployFunctionsDir, { recursive: true });
+fs.copyFileSync(path.join(here, 'index.html'), path.join(deployDir, 'index.html'));
+fs.writeFileSync(path.join(deployFunctionsDir, '[[...default]].js'), out);
+
 console.log('源文件: ' + srcPath);
-console.log('未生成或修改任何 Git仓库。');
+console.log('EdgeOne干净部署目录: deploy-edgeone/');

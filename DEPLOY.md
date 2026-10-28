@@ -7,31 +7,32 @@
 | KV / EdgeKV / D1 | 不需要 |
 | 远程数据库 /服务器后端 | 不需要 |
 | Git仓库 / CI | 不需要 |
-| EdgeOne入口 | `functions/[[default]].js`导出的 `onRequest(context)` |
-| ESA入口 | 同一文件的 `default.fetch(request, env, ctx)` |
+| EdgeOne入口 | `edge-functions/[[...default]].js` |
+| ESA入口 | `functions/[[default]].js` |
 | 必需配置 | 无；只有需要登录态解析的网盘才需设置相应环境变量 |
 
-部署物是 `functions/[[default]].js`。当前约1.8 MB，低于常见边缘函数代码包限制。
+两个入口文件内容相同，都导出 `onRequest(context)`与 `default.fetch(request, env, ctx)`。当前约1.8 MB，低于常见边缘函数代码包限制。
 
 ## 一、腾讯 EdgeOne Pages
 
 ### 方式 A：控制台直接上传
 
 1. 在 EdgeOne控制台创建 Pages / Makers项目，选择**直接上传**，不要选择 Git仓库导入。
-2. 上传 `jxpan-edgeone-parse-only.zip`，或上传包含 `functions/[[default]].js`的目录。
-3. 构建命令留空，输出目录填 `/`。
+2.构建后上传 `deploy-edgeone/`（只含 `index.html`和 `edge-functions/[[...default]].js`），或上传对应 ZIP。
+3.构建命令留空。**不要直接上传项目根目录**，否则 README、源码和 ZIP可能被当成静态文件公开。
 4. **不要创建或绑定 KV**。项目设置里即使出现 KV入口，也与本版本无关。
 5. 在项目的环境变量中按需配置下方网盘凭证，然后重新部署。
 6. 打开绑定的域名：`/`应显示解析页，`/json/parser?url=...`应返回 JSON。
 
 ### 方式 B：登录后使用 CLI
 
+先运行 `node build.mjs`，再上传干净目录：
+
 ```powershell
-npx edgeone login
-npx edgeone makers deploy
+npx edgeone makers deploy .\deploy-edgeone -n <项目名>
 ```
 
-CLI会直接上传当前目录，不要求 Git仓库。已有项目可追加 `--name <项目名>`；匿名试部署可追加 `--anonymous`，之后需登录并执行 `edgeone makers claim`认领。
+如果逐文件上传遇到 `cos.accelerate.myqcloud.com`的DNS错误，可将 `deploy-edgeone/`压缩后把 ZIP作为第一个参数上传。匿名试部署可追加 `--anonymous`，之后需登录并执行 `edgeone makers claim`认领。
 
 ## 二、阿里云 ESA
 
