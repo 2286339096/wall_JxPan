@@ -1,28 +1,64 @@
-# wall_JxPan · JxPan 网盘解析(EdgeOne Pages / 阿里云 ESA 双平台版)
+# JxPan纯解析版（腾讯 EdgeOne Pages /阿里云 ESA）
 
-基于 [ByLsPro/JxPan](https://github.com/ByLsPro/JxPan) 移植,同一份代码运行在 **腾讯 EdgeOne Pages** 或 **阿里云 ESA 边缘函数**上,不再依赖 Cloudflare Workers / D1。
+基于 [ByLsPro/JxPan](https://github.com/ByLsPro/JxPan)的纯解析移植版，作为 OpenList /壁纸站的分享链接解析中间层使用。
 
-- 功能不变:网盘直链解析、JSON API、302 跳转、短链、后台扫码登录、解析记录与统计
-- 支持网盘:阿里云盘 / 夸克 / UC / 移动 / 天翼 / 123 / 小飞机 / 蓝奏云(优享) / 光鸭
+这个版本**不需要 KV、不需要 EdgeKV、不需要 D1，也不需要远程数据库**，部署时也**不需要 Git仓库**。JxPan原版的扫码登录、后台、解析记录、统计与短链功能已关闭；只保留分享链接解析。
 
-**部署方法见 [DEPLOY.md](DEPLOY.md)** —— EdgeOne 绑定 KV 变量名 `jxpan`;ESA 创建 EdgeKV 存储空间 `jxpan` 后把 `functions/[[default]].js` 粘贴进函数即可,适配层自动识别平台。
+## 可用功能
 
-## 仓库结构
+- 网盘分享链接解析
+- 首页解析界面
+- JSON接口：`/json/parser?url=...`，也兼容 `/?url=...&type=json`
+- 302下载：`/?url=...&type=down`（并非所有网盘都支持302）
+- 通过环境变量提供网盘凭证
 
-```
-functions/[[default]].js   ← 部署物(双平台入口 onRequest + default.fetch,含存储适配层)
-src/eo-shim.js             ← 适配层源码(D1 SQL → EdgeOne KV / ESA EdgeKV)
-build.mjs                  ← 上游更新后重新构建
-test/mock-kv.test.mjs      ← 本地冒烟测试(node test/mock-kv.test.mjs,双平台 59 项)
-JxPan/                     ← 上游未加密源码与 LICENSE(构建输入)
+支持：阿里云盘、夸克、UC、移动云盘、天翼云盘、123云盘、小飞机、蓝奏云 /蓝奏云优享版、光鸭、豆包云盘。具体能否解析仍受网盘风控、分享链接类型及凭证状态影响。
+
+## 已关闭功能
+
+- `/admin`后台与账号密码登录
+- 扫码登录、登录状态与 Token保存
+- 解析记录、统计、缓存持久化
+- `/api/create-short`与 `/s/:code`短链
+
+这些路由会直接返回 `404`，不会尝试连接任何存储。正常解析请求也不会调用 KV/D1。
+
+## 部署
+
+见 [DEPLOY.md](DEPLOY.md)。直接上传 `jxpan-edgeone-parse-only.zip`或使用 EdgeOne CLI部署，无需 Git仓库。两种平台使用同一份 `functions/[[default]].js`：
+
+- 腾讯 EdgeOne Pages：`onRequest(context)`
+- 阿里云 ESA：`default.fetch(request, env, ctx)`
+
+## 目录
+
+```text
+functions/[[default]].js #可直接部署的 bundle
+src/eo-shim.js #纯解析入口与禁用路由
+test/parse-only.test.mjs #无存储冒烟测试
+build.mjs #上游更新后重新生成 bundle
+JxPan/ #上游未加密源码与 LICENSE
 ```
 
 ## 本地验证
 
-```bash
-node test/mock-kv.test.mjs   # EdgeOne 模式 + ESA 模式各跑一遍全部 SQL 家族
+需要 Node.js18或更高版本：
+
+```powershell
+cd E:\web_APP\openlist_wallpic\jxpan-edgeone-parse-only
+node test/parse-only.test.mjs
 ```
 
-## 声明
+测试会检查首页、入口、禁用路由、POST表单禁用 action，并确认解析流程没有调用模拟的 KV。
 
-沿用上游 MIT 协议,仅供个人学习与技术交流;高频调用会触发网盘风控,账号风险自担。
+## 重新构建
+
+替换 `JxPan/未加密源码.js`后运行：
+
+```powershell
+node build.mjs
+```
+
+## 说明
+
+本项目沿用上游 MIT协议，仅供个人学习与技术交流。高频调用可能触发网盘风控，账号风险自担。

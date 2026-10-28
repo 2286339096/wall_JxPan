@@ -1,11 +1,11 @@
 /**
  * JxPan EdgeOne 构建脚本
- * 把 JxPan 未加密源码 + EdgeOne KV 适配层合并为 functions/[[default]].js
+ *把 JxPan未加密源码 +纯解析入口适配层合并为 functions/[[default]].js
  *
  * 用法:
- *   1. 克隆 JxPan:  git clone https://github.com/ByLsPro/JxPan
- *   2. 修改下方 JXPAN_SRC 指向其中的 未加密源码.js
- *   3. node build.mjs
+ *1.将 JxPan未加密源码放入 JxPan/未加密源码.js
+ *2.或通过 JXPAN_SRC指向该文件
+ *3. node build.mjs
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -24,9 +24,10 @@ let srcPath = null;
 for (const c of candidates) {
   if (fs.existsSync(c)) { srcPath = c; break; }
 }
+
 if (!srcPath) {
-  console.error('未找到 未加密源码.js, 请先 git clone https://github.com/ByLsPro/JxPan 或设置 JXPAN_SRC 环境变量');
-  process.exit(1);
+ console.error('未找到未加密源码.js，请放入 JxPan目录或设置 JXPAN_SRC环境变量');
+ process.exit(1);
 }
 
 const shim = fs.readFileSync(path.join(here, 'src', 'eo-shim.js'), 'utf8');
@@ -48,6 +49,14 @@ if (/__JXPAN_WORKER/.test(src.replace('const __JXPAN_WORKER = {', ''))) {
   throw new Error('源码中已存在 __JXPAN_WORKER 标识符');
 }
 
+/*隐藏上游首页底部的源码仓库链接，不修改 JxPan原始文件。 */
+const upstreamFooterLink =
+ '<a href="https://github.com/ByLsPro/JxPan/" target="_blank" class="text-primary hover:text-primary/80 transition-colors"><i class="fa fa-github mr-1"></i>GitHub项目</a><span class="text-secondary">|</span>';
+if (!src.includes(upstreamFooterLink)) {
+ throw new Error('未找到上游首页 GitHub链接，源码结构可能已变化');
+}
+src = src.replace(upstreamFooterLink, '');
+
 const out = src + '\n\n' + shim + '\n';
 const outDir = path.join(here, 'functions');
 fs.mkdirSync(outDir, { recursive: true });
@@ -55,3 +64,4 @@ fs.writeFileSync(path.join(outDir, '[[default]].js'), out);
 
 console.log('构建完成: functions/[[default]].js  (' + (out.length / 1024).toFixed(0) + ' KB)');
 console.log('源文件: ' + srcPath);
+console.log('未生成或修改任何 Git仓库。');
