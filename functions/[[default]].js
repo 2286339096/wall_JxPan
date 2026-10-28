@@ -33657,205 +33657,7 @@ function isDisabledAction(action) {
  /(?:_qrcode|_qr_poll|_qr_save)$/.test(action);
 }
 
-const PURE_PARSE_PAGE = `<!doctype html>
-<html lang="zh-CN">
-<head>
- <meta charset="utf-8">
- <meta name="viewport" content="width=device-width, initial-scale=1">
- <meta name="robots" content="noindex,nofollow">
- <title>JxPan分享链接解析</title>
- <style>
- :root {
- color-scheme:light;
- --ink:#172238;
- --muted:#667085;
- --line:#dbe4f0;
- --paper:#fff;
- --accent:#0b6bcb;
- --accent-dark:#064d98;
- --error:#b42318;
- --shadow:0/**/22px/**/60px/**/rgba(24,46,78,.13);
- }
- * { box-sizing:border-box; }
- body {
- min-height:100vh;
- margin:0;
- padding:32px/**/16px;
- display:grid;
- place-items:center;
- color:var(--ink);
- font-family:"Microsoft YaHei UI","PingFang SC","Noto Sans CJK SC",sans-serif;
- background:
- radial-gradient(circle at12%12%,rgba(48,143,230,.18),transparent28rem),
- radial-gradient(circle at88%88%,rgba(255,183,77,.24),transparent24rem),
- #edf3fa;
- }
- main {
- width:min(100%,720px);
- padding:clamp(24px,6vw,48px);
- border:1px solid rgba(255,255,255,.85);
- border-radius:24px;
- background:rgba(255,255,255,.94);
- box-shadow:var(--shadow);
- backdrop-filter:blur(12px);
- }
- .eyebrow {
- margin:0/**/0/**/10px;
- color:var(--accent);
- font-size:13px;
- font-weight:700;
- letter-spacing:.13em;
- text-transform:uppercase;
- }
- h1 {
- margin:0;
- font-family:Georgia,"Noto Serif SC",serif;
- font-size:clamp(30px,6vw,46px);
- line-height:1.08;
- letter-spacing:-.03em;
- }
- .intro {
- margin:14px/**/0/**/28px;
- color:var(--muted);
- line-height:1.7;
- }
- label {
- display:block;
- margin-bottom:9px;
- font-size:14px;
- font-weight:700;
- }
- textarea,
- input {
- width:100%;
- border:1px solid var(--line);
- border-radius:12px;
- padding:13px/**/14px;
- color:var(--ink);
- background:var(--paper);
- font:inherit;
- outline:none;
- transition:border-color/**/160ms/**/ease,box-shadow/**/160ms/**/ease;
- }
- textarea {
- min-height:108px;
- resize:vertical;
- line-height:1.55;
- }
- textarea:focus,
- input:focus {
- border-color:var(--accent);
- box-shadow:0/**/0/**/0/**/4px/**/rgba(11,107,203,.12);
- }
- .options {
- display:grid;
- grid-template-columns:1fr/**/150px;
- gap:12px;
- margin-top:14px;
- }
- button {
- width:100%;
- margin-top:20px;
- border:0;
- border-radius:12px;
- padding:14px/**/18px;
- color:#fff;
- background:var(--accent);
- font:inherit;
- font-weight:700;
- cursor:pointer;
- transition:background/**/160ms/**/ease,transform/**/160ms/**/ease;
- }
- button:hover { background:var(--accent-dark); transform:translateY(-1px); }
- button:disabled { cursor:wait; opacity:.62; transform:none; }
- .status {
- min-height:24px;
- margin:16px/**/0;
- color:var(--muted);
- font-size:14px;
- line-height:1.6;
- }
- .status.error { color:var(--error); }
- .result {
- display:none;
- overflow:auto;
- max-height:420px;
- margin:14px/**/0;
- padding:16px;
- border:1px solid #263650;
- border-radius:12px;
- color:#dce8f7;
- background:#142033;
- font:13px/1.6/**/Consolas,"SFMono-Regular",monospace;
- white-space:pre-wrap;
- word-break:break-word;
- }
- .result.visible { display:block; }
- @media (max-width:560px) {
- body { padding:16px; }
- main { border-radius:18px; }
- .options { grid-template-columns:1fr; }
- }
- </style>
-</head>
-<body>
- <main>
- <p class="eyebrow">Pure Parse Mode</p>
- <h1>分享链接解析</h1>
- <p class="intro">粘贴网盘分享链接，获取文件列表或下载直链。无需登录，不保存解析记录。</p>
- <form id="parse-form">
- <label for="url">分享链接</label>
- <textarea id="url" name="url" required placeholder="https://pan.quark.cn/s/..."></textarea>
- <div class="options">
- <div>
- <label for="pwd">提取码（可选）</label>
- <input id="pwd" name="pwd" autocomplete="off">
- </div>
- <div>
- <label for="fid">文件夹 ID（可选）</label>
- <input id="fid" name="fid" autocomplete="off">
- </div>
- </div>
- <button id="submit" type="submit">开始解析</button>
- </form>
- <p id="status" class="status" aria-live="polite"></p>
- <pre id="result" class="result"></pre>
- </main>
- <script>
- const form = document.querySelector('#parse-form');
- const button = document.querySelector('#submit');
- const status = document.querySelector('#status');
- const result = document.querySelector('#result');
- form.addEventListener('submit', async (event) => {
- event.preventDefault();
- button.disabled = true;
- status.className = 'status';
- status.textContent = '正在请求解析服务...';
- result.className = 'result';
- const query = new URLSearchParams();
- for (const [key, value] of new FormData(form)) {
- if (String(value).trim()) query.set(key, String(value).trim());
- }
- try {
- const response = await fetch('/json/parser?' + query.toString(), {
- headers: { Accept: 'application/json' }
- });
- const payload = await response.json();
- status.textContent = response.ok && payload.success
- ? '解析请求已完成。'
- : '解析服务返回：' + (payload.msg || ('HTTP ' + response.status));
- result.textContent = JSON.stringify(payload, null,2);
- result.className = 'result visible';
- } catch (error) {
- status.className = 'status error';
- status.textContent = '请求失败：' + error.message;
- } finally {
- button.disabled = false;
- }
- });
- </script>
-</body>
-</html>`;
+const HOME_PAGE = "<!doctype html>\n<html lang=\"zh-CN\">\n<head>\n <meta charset=\"utf-8\">\n <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n <meta name=\"description\" content=\"WALLPIC壁纸收藏。\">\n <title>WALLPIC</title>\n <style>\n :root {\n color-scheme: light;\n --ink: #12375a;\n --muted: #63809a;\n --blue: #1a82c4;\n --card: rgba(255,255,255, .78);\n }\n\n * {\n box-sizing: border-box;\n }\n\n body {\n min-height:100vh;\n margin:0;\n display: grid;\n place-items: center;\n padding:24px;\n color: var(--ink);\n background:\n radial-gradient(circle at16%11%, rgba(217,242,255,.9), transparent30rem),\n radial-gradient(circle at88%88%, rgba(255,240,201,.72), transparent28rem),\n #f7fbfe;\n font-family: \"Avenir Next\", \"PingFang SC\", \"Microsoft YaHei UI\", sans-serif;\n }\n\n main {\n width: min(100%,680px);\n padding:64px;\n border:1px solid rgba(255,255,255, .92);\n border-radius:28px;\n background: var(--card);\n box-shadow:020px70px rgba(28,73,107, .12);\n backdrop-filter: blur(16px);\n }\n\n .mark {\n width:48px;\n height:48px;\n display: grid;\n place-items: center;\n border-radius:15px;\n color: #fff;\n background: var(--blue);\n font-size:20px;\n font-weight:800;\n transform: rotate(-6deg);\n }\n\n h1 {\n margin-top:28px;margin-right:0;margin-bottom:10px;margin-left:0;\n font-family: Georgia, \"Noto Serif SC\", serif;\n font-size: clamp(48px,10vw,84px);\n line-height: .95;\n letter-spacing: -.055em;\n font-weight:600;\n }\n\n p {\n margin-top:0;margin-right:0;margin-bottom:32px;margin-left:0;\n color: var(--muted);\n font-size:16px;\n line-height:1.8;\n }\n\na {\ndisplay: inline-flex;\nalign-items: center;\n gap:9px;\\n padding-top:13px;\\n padding-right:19px;\\n padding-bottom:13px;\\n padding-left:19px;\n border-radius:12px;\n color: #fff;\n background: var(--blue);\n font-size:14px;\n font-weight:700;\n text-decoration: none;\n }\n\\n a::after {\n content: \"→\";\n }\n\n @media (max-width:520px) {\n body {\n padding:16px;\n }\n\nmain {\\n padding-top:38px;\\n padding-right:28px;\\n padding-bottom:38px;\\n padding-left:28px;\n border-radius:22px;\n }\n }\n </style>\n</head>\n<body>\n <main>\n <div class=\"mark\">W</div>\n <h1>WALLPIC</h1>\n <p>把喜欢的风景，留在屏幕上。</p>\n <a href=\"https://www.wallpic.cn/\" target=\"_blank\" rel=\"noopener noreferrer\">浏览壁纸</a>\n </main>\n</body>\n</html>\n";
 
 function disabledFeatureResponse(message) {
  return new Response(JSON.stringify({
@@ -33943,16 +33745,16 @@ const url = new URL(request.url);
  });
  }
 const purePagePaths = new Set(['/', '/index.html']);
- if ((request.method === 'GET' || request.method === 'HEAD') &&
- purePagePaths.has(url.pathname) && !url.searchParams.has('url')) {
- return new Response(PURE_PARSE_PAGE, {
- status:200,
- headers: {
- 'Content-Type': 'text/html; charset=utf-8',
- 'Cache-Control': 'public, max-age=300',
- 'X-JxPan-Mode': 'parse-only'
- }
- });
+if ((request.method === 'GET' || request.method === 'HEAD') &&
+purePagePaths.has(url.pathname) && !url.searchParams.has('url')) {
+ return new Response(HOME_PAGE, {
+status:200,
+headers: {
+'Content-Type': 'text/html; charset=utf-8',
+ 'Cache-Control': 'public, max-age=3600',
+'X-JxPan-Mode': 'parse-only'
+}
+});
  }
 
 const formAction = await readFormAction(request);

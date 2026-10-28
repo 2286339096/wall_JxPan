@@ -71,7 +71,10 @@ const home = await requestOnRequest('https://jx.example.com/');
 ok(home.status ===200, 'GET / returns200', 'status=' + home.status);
 const homeHtml = await home.text();
 ok(/<html|<!DOCTYPE/i.test(homeHtml), 'GET / returns HTML');
-ok(homeHtml.includes('JxPan分享链接解析'), 'home returns the pure parse page');
+ok(homeHtml.includes('WALLPIC'), 'home returns the WALLPIC landing page');
+ok(!homeHtml.includes('分享链接解析'), 'home does not expose parser copy');
+ok(!homeHtml.includes('json/parser'), 'home does not expose parser endpoint');
+ok(!homeHtml.includes('parse-form'), 'home does not contain a parser form');
 ok(!homeHtml.includes('github.com/ByLsPro/JxPan'), 'home does not link to upstream GitHub project');
 ok(!bundle.includes('const cookies = `COOKIE_LOGIN_USER='), 'reassigned cookie variables are mutable');
 ok(!bundle.includes("const frontendIlanzouAccount = params['ilanzou_account']"), 'ilanzou credential is mutable');
@@ -109,7 +112,8 @@ ok(formLogin.status ===404, 'form action is blocked: login_status', 'status=' + 
 const esaHome = await requestFetch('https://jx.example.com/');
 ok(esaHome.status ===200, 'default.fetch GET / returns200', 'status=' + esaHome.status);
 const esaHomeHtml = await esaHome.text();
-ok(esaHomeHtml.includes('JxPan分享链接解析'), 'default.fetch GET / returns parse page');
+ok(esaHomeHtml.includes('WALLPIC'), 'default.fetch GET / returns WALLPIC page');
+ok(!esaHomeHtml.includes('parse-form'), 'default.fetch home has no parser form');
 
 const esaAdmin = await requestFetch('https://jx.example.com/admin');
 ok(esaAdmin.status ===404, 'default.fetch GET /admin returns404', 'status=' + esaAdmin.status);

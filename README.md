@@ -2,12 +2,12 @@
 
 基于 [ByLsPro/JxPan](https://github.com/ByLsPro/JxPan)的纯解析移植版，作为 OpenList /壁纸站的分享链接解析中间层使用。
 
-这个版本**不需要 KV、不需要 EdgeKV、不需要 D1，也不需要远程数据库**，部署时也**不需要 Git仓库**。JxPan原版的扫码登录、后台、解析记录、统计与短链功能已关闭；只保留分享链接解析。
+这个版本**不需要 KV、不需要 EdgeKV、不需要 D1，也不需要远程数据库**，部署时也**不需要 Git仓库**。JxPan原版的扫码登录、后台、解析记录、统计与短链功能已关闭；首页只展示壁纸站门面，分享链接能力仅通过接口提供。
 
 ## 可用功能
 
-- 网盘分享链接解析
-- 首页解析界面
+-网盘分享链接 JSON接口
+-极简 WALLPIC门面首页，不展示输入表单
 - JSON接口：`/json/parser?url=...`，也兼容 `/?url=...&type=json`
 - 302下载：`/?url=...&type=down`（并非所有网盘都支持302）
 - 通过环境变量提供网盘凭证
@@ -23,6 +23,15 @@
 
 这些路由会直接返回 `404`，不会尝试连接任何存储。正常解析请求也不会调用 KV/D1。
 
+##页面与接口
+
+- `/`、`/index.html`：WALLPIC极简门面，仅含品牌、说明和外链
+- `/json/parser?url=...`：供 OpenList调用的 JSON接口
+- `/?url=...&type=json`：JSON等价写法
+- `/?url=...&type=down`：支持时返回302下载
+
+前台页面不包含网盘链接输入框，也不显示“解析”相关字样。
+
 ## 部署
 
 见 [DEPLOY.md](DEPLOY.md)。直接上传 `jxpan-edgeone-parse-only.zip`或使用 EdgeOne CLI部署，无需 Git仓库。两个平台使用不同的入口文件名：
@@ -35,7 +44,7 @@
 ```text
 functions/[[default]].js # ESA入口 bundle
 edge-functions/[[...default]].js # EdgeOne全路径入口 bundle
-index.html #纯解析首页
+index.html #WALLPIC极简首页
 src/eo-shim.js #纯解析入口与禁用路由
 test/parse-only.test.mjs #无存储冒烟测试
 build.mjs #上游更新后重新生成 bundle
@@ -51,7 +60,7 @@ cd E:\web_APP\openlist_wallpic\jxpan-edgeone-parse-only
 node test/parse-only.test.mjs
 ```
 
-测试会检查首页、入口、禁用路由、POST表单禁用 action，并确认解析流程没有调用模拟的 KV。
+测试会检查首页不含解析入口、入口路由、禁用功能、POST表单禁用 action，并确认解析流程没有调用模拟的 KV。
 
 ## 重新构建
 

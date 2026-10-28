@@ -30,8 +30,15 @@ if (!srcPath) {
  process.exit(1);
 }
 
-const shim = fs.readFileSync(path.join(here, 'src', 'eo-shim.js'), 'utf8');
+const homePage = fs.readFileSync(path.join(here, 'index.html'), 'utf8');
+const shim = fs
+ .readFileSync(path.join(here, 'src', 'eo-shim.js'), 'utf8')
+ .replace('__JXPAN_HOME_PAGE__', JSON.stringify(homePage));
 let src = fs.readFileSync(srcPath, 'utf8');
+
+if (shim.includes('__JXPAN_HOME_PAGE__')) {
+ throw new Error('首页注入失败，请检查 src/eo-shim.js中的页面占位符');
+}
 
 /* Cloudflare Workers 的 export default 入口改名为内部常量,
  * 由适配层的 onRequest(context) 调用; 同时保留 default 导出兼容 CF */
