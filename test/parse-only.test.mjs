@@ -7,11 +7,13 @@
  * Run: node test/parse-only.test.mjs
  */
 import path from 'node:path';
+import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const bundlePath = path.join(here, '..', 'functions', '[[default]].js');
+const bundle = readFileSync(bundlePath, 'utf8');
 
 let passed =0;
 let failed =0;
@@ -70,6 +72,9 @@ ok(home.status ===200, 'GET / returns200', 'status=' + home.status);
 const homeHtml = await home.text();
 ok(/<html|<!DOCTYPE/i.test(homeHtml), 'GET / returns HTML');
 ok(!homeHtml.includes('github.com/ByLsPro/JxPan'), 'home does not link to upstream GitHub project');
+ok(!bundle.includes('const cookies = `COOKIE_LOGIN_USER='), 'reassigned cookie variables are mutable');
+ok(!bundle.includes("const frontendIlanzouAccount = params['ilanzou_account']"), 'ilanzou credential is mutable');
+ok(!bundle.includes("const frontendFeijipanAccount = params['feijipan_account']"), 'feijipan credential is mutable');
 
 const admin = await requestOnRequest('https://jx.example.com/admin');
 ok(admin.status ===404, 'GET /admin returns404', 'status=' + admin.status);

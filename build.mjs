@@ -57,6 +57,29 @@ if (!src.includes(upstreamFooterLink)) {
 }
 src = src.replace(upstreamFooterLink, '');
 
+/* EdgeOne's esbuild pass rejects these upstream const reassignments. */
+const constFixes = [
+ [
+ 'const cookies = `COOKIE_LOGIN_USER=${this.cookieLoginUser}`;',
+ 'let cookies = `COOKIE_LOGIN_USER=${this.cookieLoginUser}`;'
+ ],
+ [
+ "const frontendIlanzouAccount = params['ilanzou_account'] || url.searchParams.get('ilanzou_account') || '';",
+ "let frontendIlanzouAccount = params['ilanzou_account'] || url.searchParams.get('ilanzou_account') || '';"
+ ],
+ [
+ "const frontendFeijipanAccount = params['feijipan_account'] || url.searchParams.get('feijipan_account') || '';",
+ "let frontendFeijipanAccount = params['feijipan_account'] || url.searchParams.get('feijipan_account') || '';"
+ ]
+];
+
+for (const [from, to] of constFixes) {
+ if (!src.includes(from)) {
+ throw new Error('未找到待修复的上游常量声明: ' + from.slice(0,80));
+ }
+ src = src.split(from).join(to);
+}
+
 const out = src + '\n\n' + shim + '\n';
 const outDir = path.join(here, 'functions');
 fs.mkdirSync(outDir, { recursive: true });

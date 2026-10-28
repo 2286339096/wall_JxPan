@@ -12868,7 +12868,7 @@ class Cloud189Parser {
             const signData = `600100422${timestamp}1`;
             const signature = await this.md5(signData);
             
-            const cookies = `COOKIE_LOGIN_USER=${this.cookieLoginUser}`;
+            let cookies = `COOKIE_LOGIN_USER=${this.cookieLoginUser}`;
             if (this.sson) {
                 cookies += `; SSON=${this.sson}`;
             }
@@ -12906,7 +12906,7 @@ class Cloud189Parser {
             const signData = `600100422${timestamp}1`;
             const signature = await this.md5(signData);
             
-            const cookies = `COOKIE_LOGIN_USER=${this.cookieLoginUser}`;
+            let cookies = `COOKIE_LOGIN_USER=${this.cookieLoginUser}`;
             if (this.sson) {
                 cookies += `; SSON=${this.sson}`;
             }
@@ -12956,7 +12956,7 @@ class Cloud189Parser {
                 'isFolder': 0
             }]);
             
-            const cookies = `COOKIE_LOGIN_USER=${this.cookieLoginUser}`;
+            let cookies = `COOKIE_LOGIN_USER=${this.cookieLoginUser}`;
             if (this.sson) {
                 cookies += `; SSON=${this.sson}`;
             }
@@ -13005,7 +13005,7 @@ class Cloud189Parser {
             const signData = `600100422${timestamp}1`;
             const signature = await this.md5(signData);
             
-            const cookies = `COOKIE_LOGIN_USER=${this.cookieLoginUser}`;
+            let cookies = `COOKIE_LOGIN_USER=${this.cookieLoginUser}`;
             if (this.sson) {
                 cookies += `; SSON=${this.sson}`;
             }
@@ -21542,8 +21542,8 @@ async function handleMainRequest(request, env, ctx) {
         const frontendUcCookie = params['uc_cookie'] || url.searchParams.get('uc_cookie') || '';
         const frontendGuangyaLogin = params['guangya_login'] || url.searchParams.get('guangya_login') || '';
         const frontendMcloudCookie = params['mcloud_cookie'] || url.searchParams.get('mcloud_cookie') || '';
-        const frontendIlanzouAccount = params['ilanzou_account'] || url.searchParams.get('ilanzou_account') || '';
-        const frontendFeijipanAccount = params['feijipan_account'] || url.searchParams.get('feijipan_account') || '';
+        let frontendIlanzouAccount = params['ilanzou_account'] || url.searchParams.get('ilanzou_account') || '';
+        let frontendFeijipanAccount = params['feijipan_account'] || url.searchParams.get('feijipan_account') || '';
         const frontendPan123Auth = params['pan123_auth'] || url.searchParams.get('pan123_auth') || '';
         // 收集所有fid参数（fid, fid2, fid3, ...）支持无限层级嵌套
         const fidChainParam = [];
